@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `tests/skill.rs` fails when the skill names a command the CLI does not have, and `scripts/skill-eval/`
+  compares skill versions on a fixed port task, scored by `gate` (turns and cost from the agent's JSON).
+
 ## 4.1.0 (2026-11-24)
 
 - `enable --only <fn>` (repeatable) switches on just the named functions of a unit, and `--partial`
