@@ -685,6 +685,18 @@ fn call(name: &str, args: &Value) -> Result<Value> {
             })
             .unwrap_or_default()
     };
+    let opt_timeout = || -> Result<Option<u64>> {
+        match args.get("timeout") {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => {
+                let secs = v
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("--timeout must be at least 1 second"))?;
+                app::check_timeout(Some(secs))?;
+                Ok(Some(secs))
+            }
+        }
+    };
     Ok(match name {
         "analyze" => {
             let root = path("root")?;
@@ -1019,6 +1031,7 @@ fn call(name: &str, args: &Value) -> Result<Value> {
         )?)?,
         "app_record" => {
             let repo = path("repo")?;
+            let timeout_secs = opt_timeout()?;
             let inputs = opt_path("inputs");
             let effect_response = match args.get("effect_response") {
                 None | Some(Value::Null) => Vec::new(),
@@ -1047,7 +1060,7 @@ fn call(name: &str, args: &Value) -> Result<Value> {
                 normalize: &strings("normalize"),
                 name: args["name"].as_str(),
                 traps: args["traps"].as_bool().unwrap_or(true),
-                timeout_secs: args["timeout"].as_u64(),
+                timeout_secs,
                 http: args["http"].as_bool().unwrap_or(false),
                 port: args["port"].as_u64().and_then(|p| u16::try_from(p).ok()),
                 server_args: &strings("args"),
@@ -1060,10 +1073,11 @@ fn call(name: &str, args: &Value) -> Result<Value> {
         }
         "app_replay" => {
             let repo = path("repo")?;
+            let timeout_secs = opt_timeout()?;
             serde_json::to_value(app::replay(&app::ReplayOptions {
                 repo: &repo,
                 build: args["build"].as_str(),
-                timeout_secs: args["timeout"].as_u64(),
+                timeout_secs,
                 port: args["port"].as_u64().and_then(|p| u16::try_from(p).ok()),
                 case: args["case"].as_str(),
             })?)?
@@ -1424,5 +1438,27 @@ mod tests {
             &json!({ "repo": ".", "effect_response": ["GET /x=201", 42] }),
         );
         assert!(bad_mixed.is_err());
+    }
+
+    #[test]
+    fn app_record_and_app_replay_reject_zero_or_negative_timeout() {
+        let dir = std::env::temp_dir().join(format!("ra-mcp-timeout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for tool in ["app_record", "app_replay"] {
+            for timeout in [json!(0), json!(-1)] {
+                let err = call(tool, &json!({ "repo": dir, "timeout": timeout })).unwrap_err();
+                let msg = format!("{err:#}");
+                assert!(
+                    msg.contains("--timeout") && msg.contains("1 second"),
+                    "{tool} with {timeout}: {msg}"
+                );
+            }
+        }
+        assert!(
+            !dir.join("rust").exists(),
+            "rejected timeout must not create rust/app-cases"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
