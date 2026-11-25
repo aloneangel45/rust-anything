@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `app record --timeout 0` and `app replay --timeout 0` (and MCP `app_record` / `app_replay` with
+  `timeout: 0`) are refused before anything runs, instead of killing every run at once; a saved
+  `timeout_secs` of 0 is refused too, with a hint to pass `--timeout` (#497, #514 by @aloneangel45).
 - `app record --ready-timeout SECS` (and MCP `app_record`'s `ready_timeout`) sets how long a server
   start waits for its port instead of a fixed 60 seconds. It is saved with the cases and used by
   replay and the front door; 0 restores the default (#332, #478 by @XiaoBinGan).

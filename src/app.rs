@@ -3360,6 +3360,7 @@ mod tests {
             float_tolerance: None,
             float_files: &[],
             effects: None,
+            ready_secs: None,
         })
         .unwrap_err();
         let rec_msg = format!("{rec_err:#}");
