@@ -74,6 +74,7 @@ fn record(repo: &Path, run: &str, traps: bool) -> app::RecordOutcome {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap()
 }
@@ -125,6 +126,7 @@ fn a_port_that_is_taken_is_named_before_the_build_runs() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap_err();
     let text = format!("{err:#}");
@@ -134,6 +136,50 @@ fn a_port_that_is_taken_is_named_before_the_build_runs() {
         text.contains(&format!("port {port} is already in use")),
         "{text}"
     );
+}
+
+#[test]
+fn a_ready_timeout_shortens_the_wait_for_a_server_that_never_listens() {
+    // A server that never listens used to cost the full minute. `--ready-timeout` makes that
+    // configurable, and the message names the wait it used.
+    let Some(python) = common::python() else {
+        return;
+    };
+    let repo =
+        std::env::temp_dir().join(format!("rust-anything-http-ready-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&repo);
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(repo.join("server.py"), "import time\ntime.sleep(600)\n").unwrap();
+    let started = std::time::Instant::now();
+    let err = app::record(&RecordOptions {
+        repo: &repo,
+        run: &[python.to_string(), "server.py".to_string()],
+        inputs: None,
+        normalize: &[],
+        name: None,
+        traps: false,
+        timeout_secs: None,
+        http: true,
+        server_args: &[],
+        fresh: &[],
+        pace_ms: None,
+        port: None,
+        float_tolerance: None,
+        float_files: &[],
+        effects: None,
+        ready_secs: Some(1),
+    })
+    .unwrap_err();
+    let waited = started.elapsed();
+    let text = format!("{err:#}");
+    let saved = std::fs::read_to_string(repo.join("rust/app-cases/rust-anything.json")).ok();
+    let _ = std::fs::remove_dir_all(&repo);
+    assert!(text.contains("did not listen within 1s"), "{text}");
+    assert!(
+        waited < std::time::Duration::from_secs(30),
+        "waited {waited:?}"
+    );
+    assert_eq!(saved, None, "a failed record writes no settings");
 }
 
 #[test]
@@ -165,6 +211,7 @@ fn a_build_that_exits_before_listening_says_so() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap_err();
     let text = format!("{err:#}");
@@ -209,6 +256,7 @@ fn http_record_keeps_distinct_requests_with_the_same_name() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap();
     let repeated = replay(&repo, None);
@@ -271,6 +319,7 @@ fn http_fresh_files_and_arguments_reach_every_start() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap();
     let body = std::fs::read_to_string(out.dir.join("a2.body")).unwrap();
@@ -335,6 +384,7 @@ fn http_rerecord_uses_the_existing_fixed_port() {
             float_tolerance: None,
             float_files: &[],
             effects: None,
+            ready_secs: None,
         })
     };
     let first = record(Some(port));
@@ -768,6 +818,7 @@ fn http_fixed_port_rejects_existing_listener_and_early_exit() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap_err();
     assert!(
@@ -795,6 +846,7 @@ fn http_fixed_port_rejects_existing_listener_and_early_exit() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap();
     assert!(recorded.cases > 0);
@@ -886,6 +938,7 @@ fn a_server_listening_only_on_ipv6_loopback_is_recorded_and_replayed() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap();
     assert_eq!(out.cases, 1);
@@ -974,6 +1027,7 @@ fn a_server_started_through_a_wrapper_is_stopped_with_it() {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     });
     let still_listening = std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
@@ -1203,6 +1257,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap();
     assert_eq!(rec.cases, 3, "{rec:?}");

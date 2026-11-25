@@ -542,6 +542,11 @@ enum AppCmd {
         /// saved with the cases and used by replay; 0 removes it.
         #[arg(long, value_name = "MS")]
         pace: Option<u64>,
+        /// Seconds to wait for the server to accept connections before giving up (default 60).
+        /// Implies --http; saved with the cases and used by replay and the front door; 0 restores
+        /// the default.
+        #[arg(long, value_name = "SECS")]
+        ready_timeout: Option<u64>,
         /// Numbers in the output match when they differ by at most this times the larger
         /// magnitude (absolute below 1), e.g. 1e-9 for numeric code. Saved with the cases; 0
         /// removes it.
@@ -1567,6 +1572,7 @@ fn run_app(command: AppCmd) -> Result<ExitCode> {
             server_args,
             fresh,
             pace,
+            ready_timeout,
             float_tolerance,
             float_files,
             effects,
@@ -1601,6 +1607,7 @@ fn run_app(command: AppCmd) -> Result<ExitCode> {
                 float_tolerance,
                 float_files: &float_files,
                 effects,
+                ready_secs: ready_timeout,
             })?;
             if json {
                 say!("{}", serde_json::to_string_pretty(&outcome)?);

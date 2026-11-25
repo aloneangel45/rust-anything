@@ -64,6 +64,7 @@ fn record(repo: &Path) -> app::RecordOutcome {
         float_tolerance: None,
         float_files: &[],
         effects: None,
+        ready_secs: None,
     })
     .unwrap()
 }
