@@ -402,6 +402,30 @@ fn discard_recording(path: &Path) -> std::io::Result<&'static str> {
     }
 }
 
+/// Environment `(name, value)` pairs whose names and values are valid Unicode.
+pub(crate) fn unicode_env() -> impl Iterator<Item = (String, String)> {
+    std::env::vars_os()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+}
+
+/// Formats any secret-looking environment variables whose values appear in `cases` as
+/// `"VAR (in f1, f2); ..."`, naming variables and functions without ever exposing values.
+/// Returns `None` when no secret values are present.
+pub(crate) fn recorded_secret_summary(
+    cases: &str,
+    environment: impl IntoIterator<Item = (String, String)>,
+) -> Option<String> {
+    let found = recorded_secrets(cases, environment);
+    if found.is_empty() {
+        return None;
+    }
+    let listed: Vec<String> = found
+        .iter()
+        .map(|(name, functions)| format!("{name} (in {})", functions.join(", ")))
+        .collect();
+    Some(listed.join("; "))
+}
+
 /// Fails, after removing the recording, when `cases.jsonl` holds the value of a secret-looking
 /// environment variable. The file is meant to be committed. Variables whose name or value is not
 /// valid Unicode cannot be searched for as text and are skipped.
@@ -409,29 +433,19 @@ fn refuse_recorded_secrets(cases_path: &Path) -> Result<()> {
     let Ok(cases) = std::fs::read_to_string(cases_path) else {
         return Ok(());
     };
-    let environment = std::env::vars_os()
-        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)));
-    let found = recorded_secrets(&cases, environment);
-    if found.is_empty() {
+    let Some(listed) = recorded_secret_summary(&cases, unicode_env()) else {
         return Ok(());
-    }
+    };
     let done = discard_recording(cases_path).with_context(|| {
         format!(
             "the recording holds an environment secret and {} could be neither removed nor emptied: delete it by hand",
             cases_path.display()
         )
     })?;
-    let listed: Vec<String> = found
-        .iter()
-        .map(|(name, functions)| format!("{name} (in {})", functions.join(", ")))
-        .collect();
     bail!(
-        "the recording held the value of {}, and {} is meant to be committed: it was {done}. \
+        "the recording held the value of {listed}, and {CASES} is meant to be committed: it was {done}. \
          Record without those variables (`env -u NAME rust-anything record ...`), or change \
          the functions or inputs that return them",
-        listed.join("; "),
-        CASES,
-        done = done
     )
 }
 

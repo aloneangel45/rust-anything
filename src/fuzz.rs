@@ -151,6 +151,32 @@ fn lines(text: &str) -> impl Iterator<Item = (&str, Value)> {
         .filter_map(|l| harness::parse_deep(l).ok().map(|v| (l, v)))
 }
 
+fn append_kept(
+    recording: &Path,
+    original: &str,
+    keep: &str,
+    environment: impl IntoIterator<Item = (String, String)>,
+) -> Result<()> {
+    if keep.is_empty() {
+        return Ok(());
+    }
+    if let Some(listed) = harness::recorded_secret_summary(keep, environment) {
+        bail!(
+            "fuzz --keep would append the value of {listed} into {CASES}, which is meant to be \
+             committed: the existing recording was left unchanged. Fuzz without those variables \
+             (`env -u NAME rust-anything fuzz ...`), or change the functions or inputs that return \
+             them",
+        );
+    }
+    let mut text = original.to_string();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(keep);
+    std::fs::write(recording, text)?;
+    Ok(())
+}
+
 pub fn fuzz(opts: &FuzzOptions) -> Result<FuzzOutcome> {
     let crate_dir = std::path::absolute(opts.crate_dir)?;
     let manifest = Manifest::load(&crate_dir)?;
@@ -252,14 +278,7 @@ pub fn fuzz(opts: &FuzzOptions) -> Result<FuzzOutcome> {
         }
     }
     let _ = std::fs::remove_dir_all(crate_dir.join(WORK_DIR).join("coverage"));
-    if !keep.is_empty() {
-        let mut text = original;
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text.push_str(&keep);
-        std::fs::write(&recording, text)?;
-    }
+    append_kept(&recording, &original, &keep, harness::unicode_env())?;
     Ok(outcome)
 }
 
@@ -308,6 +327,40 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(&kept).unwrap(), "old");
         assert!(!fresh.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn append_kept_refuses_secrets_without_modifying_existing_recording() {
+        let dir =
+            std::env::temp_dir().join(format!("rust-anything-fuzz-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let recording = dir.join(CASES);
+        let original = "{\"fn\":\"existing\",\"args\":[],\"ok\":1}\n";
+        std::fs::write(&recording, original).unwrap();
+
+        let canary = ["EXAMPLE", "0000", "fake"].join("-");
+        let tainted = format!("{{\"fn\":\"setting\",\"args\":[\"abc\"],\"ok\":\"{canary}\"}}\n");
+        let env = vec![("MY_API_TOKEN".to_string(), canary.clone())];
+
+        let err = append_kept(&recording, original, &tainted, env).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("MY_API_TOKEN"), "{msg}");
+        assert!(msg.contains("setting"), "{msg}");
+        assert!(
+            !msg.contains(&canary),
+            "secret value leaked in error: {msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&recording).unwrap(), original);
+
+        let clean = "{\"fn\":\"other\",\"args\":[],\"ok\":2}\n";
+        append_kept(&recording, original, clean, Vec::new()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&recording).unwrap(),
+            format!("{original}{clean}")
+        );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
